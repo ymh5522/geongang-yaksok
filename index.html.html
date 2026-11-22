@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>건강약속 - 스마트 복약 알림</title>
+<style>
+  :root{--bg:#fffdf7;--fg:#1d1d1d;--muted:#555;--card:#fff;--line:#d9d4c7;--main:#1f5fa8;--ok:#1d7a3a;--warn:#b3261e;--fs:20px}
+  body.hc{--bg:#000;--fg:#fff;--muted:#ddd;--card:#111;--line:#fff;--main:#ffd400;--ok:#7CFC7C;--warn:#ff8080}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif;font-size:var(--fs);line-height:1.5}
+  header{padding:16px 20px;border-bottom:2px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+  h1{margin:0;font-size:1.3em}
+  main{max-width:720px;margin:0 auto;padding:16px 20px 120px}
+  nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:2px solid var(--line)}
+  nav button{flex:1;padding:14px 4px;border:0;background:none;color:var(--fg);font-size:.9em;font-weight:700;cursor:pointer}
+  nav button[aria-current="page"]{color:var(--main);border-top:4px solid var(--main)}
+  .card{background:var(--card);border:2px solid var(--line);border-radius:14px;padding:14px 16px;margin:12px 0;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .card.done{opacity:.75}
+  .time{font-size:1.5em;font-weight:800;min-width:4.2em}
+  .name{flex:1;font-weight:700;min-width:8em}
+  .memo{display:block;font-weight:400;color:var(--muted);font-size:.85em}
+  button.big{font-size:1em;font-weight:800;padding:12px 18px;border-radius:12px;border:2px solid var(--main);background:var(--main);color:#fff;cursor:pointer;min-height:56px}
+  body.hc button.big{color:#000}
+  button.ghost{background:none;color:var(--main)}
+  button.okb{background:var(--ok);border-color:var(--ok)}
+  button.danger{background:none;color:var(--warn);border-color:var(--warn)}
+  label{display:block;font-weight:700;margin-top:14px}
+  input,textarea{width:100%;font-size:1em;padding:12px;border:2px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg)}
+  .days{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .days label{margin:0;font-weight:400;border:2px solid var(--line);border-radius:10px;padding:6px 12px}
+  .days input{width:auto}
+  .err{color:var(--warn);font-weight:700;min-height:1.5em}
+  #toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:12px 20px;border-radius:12px;display:none;align-items:center;gap:12px;font-weight:700;max-width:92%}
+  #toast button{font-size:.9em;padding:6px 12px;border-radius:8px;border:2px solid var(--bg);background:none;color:var(--bg);cursor:pointer}
+  #alarm{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;padding:20px}
+  #alarm .box{background:var(--card);border:3px solid var(--main);border-radius:16px;padding:24px;max-width:480px;width:100%;text-align:center}
+  .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+  .hint{color:var(--muted);font-size:.85em}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>💊 건강약속</h1>
+  <span id="today" class="hint"></span>
+</header>
+
+<main>
+  <!-- 첫 화면: 오늘 복약 -->
+  <section id="v-today">
+    <h2>오늘 먹을 약</h2>
+    <p id="notiHint" class="hint"></p>
+    <div id="todayList"></div>
+    <div class="row"><button class="big" data-go="edit">＋ 약 추가</button></div>
+  </section>
+
+  <!-- 약 추가·수정 -->
+  <section id="v-edit" class="hidden">
+    <h2 id="editTitle">약 추가</h2>
+    <form id="form" novalidate>
+      <label for="fName">약 이름 (필수)</label>
+      <input id="fName" maxlength="30" autocomplete="off">
+      <label for="fTime">복용 시간 (필수)</label>
+      <input id="fTime" type="time">
+      <span class="hint" id="ampm"></span>
+      <label>먹는 요일</label>
+      <div class="days" id="fDays"></div>
+      <label for="fMemo">메모 (선택)</label>
+      <textarea id="fMemo" rows="2" maxlength="60" placeholder="예: 식후 30분"></textarea>
+      <p class="err" id="fErr" role="alert"></p>
+      <div class="row">
+        <button class="big" type="submit">저장</button>
+        <button class="big ghost" type="button" data-go="today">취소</button>
+        <button class="big danger hidden" type="button" id="delBtn">삭제</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- 약 목록 -->
+  <section id="v-list" class="hidden">
+    <h2>내 약 목록</h2>
+    <div id="allList"></div>
+  </section>
+
+  <!-- 설정 -->
+  <section id="v-set" class="hidden">
+    <h2>설정</h2>
+    <div class="row">
+      <button class="big ghost" id="fsDown">글씨 작게</button>
+      <button class="big ghost" id="fsUp">글씨 크게</button>
+      <button class="big ghost" id="hcBtn">고대비 켜기/끄기</button>
+    </div>
+    <div class="row">
+      <button class="big ghost" id="notiBtn">알림 허용하기</button>
+    </div>
+    <h3>기록 백업·복원</h3>
+    <p class="hint">기기를 바꾸기 전에 백업 파일을 저장해 두세요. 파일은 이 기기에만 저장됩니다.</p>
+    <div class="row">
+      <button class="big ghost" id="expBtn">백업 파일 저장</button>
+      <label class="big ghost" style="margin:0;border:2px solid var(--main);border-radius:12px;padding:12px 18px;cursor:pointer;color:var(--main)">
+        백업 불러오기 <input type="file" id="impFile" accept="application/json" class="hidden">
+      </label>
+    </div>
+  </section>
+</main>
+
+<nav>
+  <button data-go="today" aria-current="page">오늘</button>
+  <button data-go="list">약 목록</button>
+  <button data-go="set">설정</button>
+</nav>
+
+<div id="toast" role="status"><span id="toastMsg"></span><button id="undoBtn">되돌리기</button></div>
+
+<div id="alarm" role="alertdialog" aria-labelledby="alarmMsg">
+  <div class="box">
+    <p style="font-size:1.4em;font-weight:800" id="alarmMsg"></p>
+    <div class="row" style="justify-content:center">
+      <button class="big okb" id="alarmDone">먹었어요</button>
+      <button class="big ghost" id="alarmLater">10분 뒤 다시</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* 건강약속 — 외부 서버·API·API 키 없이 브라우저 안에서만 동작합니다.
+   저장: localStorage 'gy_meds'(약 목록), 'gy_log'(복용 기록), 'gy_set'(화면 설정) */
+const DAYS=['일','월','화','수','목','금','토'];
+const $=id=>document.getElementById(id);
+function load(k,d){try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}}
+function save(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){toast('저장 공간에 저장하지 못했습니다')}}
+let meds=load('gy_meds',[]), log=load('gy_log',{}), set=load('gy_set',{fs:20,hc:false});
+let editId=null, undoFn=null, toastTimer=null, snooze={};
+const dayStr=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+const fmt=t=>{const [h,m]=t.split(':').map(Number);return (h<12?'오전 ':'오후 ')+((h%12)||12)+':'+String(m).padStart(2,'0')};
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function applySet(){document.documentElement.style.setProperty('--fs',set.fs+'px');document.body.classList.toggle('hc',!!set.hc)}
+function go(v){
+  ['today','edit','list','set'].forEach(x=>$('v-'+x).classList.toggle('hidden',x!==v));
+  document.querySelectorAll('nav button').forEach(b=>b.setAttribute('aria-current',b.dataset.go===v?'page':'false'));
+  if(v==='edit'&&editId===null) openEdit(null);
+  render(); window.scrollTo(0,0);
+}
+function doneSet(){return new Set(log[dayStr()]||[])}
+function render(){
+  const now=new Date(); $('today').textContent=(now.getMonth()+1)+'월 '+now.getDate()+'일 '+DAYS[now.getDay()]+'요일';
+  const done=doneSet();
+  const todays=meds.filter(m=>m.days.includes(now.getDay())).sort((a,b)=>a.time.localeCompare(b.time));
+  $('todayList').innerHTML=todays.length?todays.map(m=>{
+    const d=done.has(m.id);
+    return `<div class="card ${d?'done':''}"><span class="time">${fmt(m.time)}</span>
+      <span class="name">${esc(m.name)}<span class="memo">${esc(m.memo||'')}</span></span>
+      ${d?`<span style="color:var(--ok);font-weight:800">✔ 먹었어요</span><button class="big ghost" data-undo="${m.id}">취소</button>`
+         :`<button class="big okb" data-done="${m.id}">먹었어요</button>`}</div>`}).join('')
+    :'<p class="hint">오늘 먹을 약이 없습니다. 아래 ‘약 추가’를 눌러 등록하세요.</p>';
+  $('allList').innerHTML=meds.length?meds.slice().sort((a,b)=>a.time.localeCompare(b.time)).map(m=>
+    `<div class="card"><span class="time">${fmt(m.time)}</span><span class="name">${esc(m.name)}
+      <span class="memo">${m.days.length===7?'매일':m.days.map(d=>DAYS[d]).join('·')}${m.memo?' · '+esc(m.memo):''}</span></span>
+      <button class="big ghost" data-edit="${m.id}">수정</button></div>`).join('')
+    :'<p class="hint">등록된 약이 없습니다.</p>';
+  const p=('Notification' in window)?Notification.permission:'unsupported';
+  $('notiHint').textContent=p==='granted'?'알림이 켜져 있습니다. 이 화면을 열어 두면 시간에 맞춰 알려 드립니다.'
+    :p==='unsupported'?'이 브라우저는 알림을 지원하지 않아 화면 안내로만 알려 드립니다.'
+    :'알림이 꺼져 있습니다. 설정에서 ‘알림 허용하기’를 누르세요. (꺼져 있어도 화면 안내는 나옵니다)';
+}
+function openEdit(id){
+  editId=id; const m=meds.find(x=>x.id===id);
+  $('editTitle').textContent=m?'약 수정':'약 추가';
+  $('fName').value=m?m.name:''; $('fTime').value=m?m.time:''; $('fMemo').value=m?m.memo:'';
+  const days=m?m.days:[0,1,2,3,4,5,6];
+  $('fDays').innerHTML=DAYS.map((d,i)=>`<label><input type="checkbox" value="${i}" ${days.includes(i)?'checked':''}> ${d}</label>`).join('');
+  $('delBtn').classList.toggle('hidden',!m); $('fErr').textContent=''; showAmpm();
+}
+function showAmpm(){$('ampm').textContent=$('fTime').value?'→ '+fmt($('fTime').value)+' 에 알려 드립니다':''}
+$('fTime').addEventListener('input',showAmpm);
+$('form').addEventListener('submit',e=>{
+  e.preventDefault();
+  const name=$('fName').value.trim(), time=$('fTime').value, memo=$('fMemo').value.trim();
+  const days=[...$('fDays').querySelectorAll('input:checked')].map(i=>+i.value);
+  if(!name){$('fErr').textContent='약 이름을 입력해 주세요.';$('fName').focus();return}
+  if(!/^\d{2}:\d{2}$/.test(time)){$('fErr').textContent='복용 시간을 선택해 주세요.';$('fTime').focus();return}
+  if(!days.length){$('fErr').textContent='먹는 요일을 하나 이상 골라 주세요.';return}
+  if(meds.some(m=>m.id!==editId&&m.name===name&&m.time===time)){$('fErr').textContent='같은 이름·시간의 약이 이미 있습니다.';return}
+  if(editId){Object.assign(meds.find(m=>m.id===editId),{name,time,days,memo})}
+  else meds.push({id:Date.now().toString(36),name,time,days,memo});
+  save('gy_meds',meds); toast(fmt(time)+' '+name+' 저장했습니다'); editId=null; go('today');
+});
+$('delBtn').addEventListener('click',()=>{
+  const m=meds.find(x=>x.id===editId); if(!m) return;
+  const idx=meds.indexOf(m); meds.splice(idx,1); save('gy_meds',meds); editId=null;
+  toast(m.name+' 삭제했습니다',()=>{meds.splice(idx,0,m);save('gy_meds',meds);render()}); go('list');
+});
+function markDone(id,on){
+  const k=dayStr(), s=new Set(log[k]||[]); on?s.add(id):s.delete(id); log[k]=[...s];
+  const days=Object.getOwnPropertyNames(log).sort().slice(-90), n={}; days.forEach(x=>n[x]=log[x]); log=n; save('gy_log',log); render();
+}
+document.addEventListener('click',e=>{
+  const t=e.target.closest('button'); if(!t) return;
+  if(t.dataset.go){ if(t.dataset.go==='edit') editId=null; go(t.dataset.go) }
+  if(t.dataset.done){markDone(t.dataset.done,true);const m=meds.find(x=>x.id===t.dataset.done);toast(m.name+' 복용 완료',()=>markDone(m.id,false))}
+  if(t.dataset.undo){markDone(t.dataset.undo,false);toast('복용 완료를 취소했습니다')}
+  if(t.dataset.edit){openEdit(t.dataset.edit);go('edit')}
+});
+function toast(msg,undo){
+  $('toastMsg').textContent=msg; undoFn=undo||null; $('undoBtn').style.display=undo?'':'none';
+  $('toast').style.display='flex'; clearTimeout(toastTimer); toastTimer=setTimeout(()=>$('toast').style.display='none',undo?7000:3000);
+}
+$('undoBtn').addEventListener('click',()=>{if(undoFn)undoFn();undoFn=null;$('toast').style.display='none'});
+
+/* 알림: 30초마다 확인, 시간이 된 약이 아직 미복용이면 화면 안내 + (허용 시) 브라우저 알림 */
+let alarmId=null, notified=new Set();
+function check(){
+  const now=new Date(), hm=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0'), done=doneSet();
+  for(const m of meds){
+    if(!m.days.includes(now.getDay())||done.has(m.id)) continue;
+    const tag=dayStr()+m.id, due=snooze[m.id]?Date.now()>=snooze[m.id]:m.time<=hm;
+    if(due&&!notified.has(tag+(snooze[m.id]||''))){
+      notified.add(tag+(snooze[m.id]||'')); delete snooze[m.id]; ring(m); break;
+    }
+  }
+}
+function ring(m){
+  alarmId=m.id; $('alarmMsg').textContent=fmt(m.time)+' · '+m.name+' 드실 시간입니다'; $('alarm').style.display='flex';
+  if('Notification' in window&&Notification.permission==='granted'){try{new Notification('건강약속',{body:m.name+' 드실 시간입니다'})}catch(e){}}
+  if(navigator.vibrate) navigator.vibrate([300,200,300]);
+}
+$('alarmDone').addEventListener('click',()=>{markDone(alarmId,true);$('alarm').style.display='none';toast('복용 완료',()=>markDone(alarmId,false))});
+$('alarmLater').addEventListener('click',()=>{snooze[alarmId]=Date.now()+10*60*1000;$('alarm').style.display='none';toast('10분 뒤 다시 알려 드립니다')});
+$('notiBtn').addEventListener('click',async()=>{
+  if(!('Notification' in window)){toast('이 브라우저는 알림을 지원하지 않습니다');return}
+  const r=await Notification.requestPermission(); toast(r==='granted'?'알림을 허용했습니다':'알림이 허용되지 않았습니다'); render();
+});
+$('fsUp').addEventListener('click',()=>{set.fs=Math.min(30,set.fs+2);save('gy_set',set);applySet()});
+$('fsDown').addEventListener('click',()=>{set.fs=Math.max(16,set.fs-2);save('gy_set',set);applySet()});
+$('hcBtn').addEventListener('click',()=>{set.hc=!set.hc;save('gy_set',set);applySet()});
+$('expBtn').addEventListener('click',()=>{
+  const blob=new Blob([JSON.stringify({meds,log},null,1)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='건강약속_백업_'+dayStr()+'.json'; a.click(); URL.revokeObjectURL(a.href);
+});
+$('impFile').addEventListener('change',e=>{
+  const f=e.target.files[0]; if(!f) return; const r=new FileReader();
+  r.onload=()=>{try{const d=JSON.parse(r.result); if(!Array.isArray(d.meds)) throw 0;
+    const old={meds,log}; meds=d.meds; log=d.log||{}; save('gy_meds',meds); save('gy_log',log);
+    toast('백업을 불러왔습니다',()=>{meds=old.meds;log=old.log;save('gy_meds',meds);save('gy_log',log);render()}); render();
+  }catch(err){toast('올바른 백업 파일이 아닙니다')}};
+  r.readAsText(f); e.target.value='';
+});
+applySet(); render(); setInterval(()=>{check();render()},30000); check();
+</script>
+</body>
+</html>
